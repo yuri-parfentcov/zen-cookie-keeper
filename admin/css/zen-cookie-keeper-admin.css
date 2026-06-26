@@ -1,0 +1,191 @@
+/* Zen Cookie Keeper — admin styles. */
+
+.zenck-wrap {
+	--zenck-accent: #2271b1;
+	--zenck-ok: #1a7f37;
+	--zenck-warn: #b32d2e;
+}
+
+.zenck-wrap h1 .dashicons {
+	font-size: 28px;
+	width: 28px;
+	height: 28px;
+	vertical-align: text-bottom;
+}
+
+.zenck-help {
+	background: #fff;
+	border: 1px solid #dcdcde;
+	border-left: 4px solid var(--zenck-accent);
+	padding: 12px 16px;
+	margin: 14px 0;
+	max-width: 820px;
+}
+.zenck-help h3 {
+	margin: 0 0 6px;
+}
+.zenck-help p {
+	margin: 0;
+	color: #50575e;
+}
+.zenck-source-help p + p { margin-top: 6px; }
+.zenck-source-help code,
+.zenck-source-help strong { color: #1d2327; }
+
+.zenck-cards {
+	display: flex;
+	gap: 16px;
+	flex-wrap: wrap;
+	margin: 18px 0;
+}
+.zenck-card {
+	background: #fff;
+	border: 1px solid #dcdcde;
+	border-radius: 6px;
+	padding: 16px 18px;
+	min-width: 220px;
+	flex: 1;
+}
+.zenck-card h2 {
+	margin-top: 0;
+	font-size: 14px;
+	text-transform: uppercase;
+	letter-spacing: .04em;
+	color: #646970;
+}
+.zenck-big {
+	font-size: 30px;
+	font-weight: 600;
+	margin: 6px 0;
+}
+.zenck-ok { color: var(--zenck-ok); }
+.zenck-warn { color: var(--zenck-warn); }
+.zenck-note { color: #646970; font-size: 12px; }
+
+.zenck-badge {
+	display: inline-block;
+	padding: 2px 8px;
+	border-radius: 10px;
+	font-size: 11px;
+	font-weight: 600;
+	text-transform: uppercase;
+}
+.zenck-badge-analytics { background: #e6f4ea; color: #1a7f37; }
+.zenck-badge-advertising { background: #fce8e8; color: #b32d2e; }
+
+.zenck-platform { margin: 14px 0; }
+.zenck-platform-head {
+	padding-bottom: 4px;
+	margin: 0 0 6px;
+	font-size: 15px;
+}
+
+/* Cookies registry — compact tables whose columns line up across every
+   platform block. table-layout:fixed + shared % widths means each table
+   renders identical columns regardless of its own content. */
+.zenck-registry {
+	max-width: 1080px;
+	table-layout: fixed;
+}
+.zenck-registry th,
+.zenck-registry td {
+	padding: 6px 10px;
+	vertical-align: middle;
+	word-break: break-word;
+}
+.zenck-registry col:nth-child(1), .zenck-registry th:nth-child(1) { width: 30%; }
+.zenck-registry col:nth-child(2), .zenck-registry th:nth-child(2) { width: 13%; }
+.zenck-registry col:nth-child(3), .zenck-registry th:nth-child(3) { width: 15%; }
+.zenck-registry col:nth-child(4), .zenck-registry th:nth-child(4) { width: 16%; }
+.zenck-registry col:nth-child(5), .zenck-registry th:nth-child(5) { width: 12%; }
+.zenck-registry col:nth-child(6), .zenck-registry th:nth-child(6) { width: 14%; }
+.zenck-registry code { font-size: 13px; }
+.zenck-registry td .description { font-size: 11px; line-height: 1.4; }
+.zenck-registry .zenck-lifetime { width: 56px; }
+
+/* "Not supported" + advanced blocks share the registry width so the screen
+   reads as one tidy column instead of three full-width slabs. */
+.zenck-unsupported { max-width: 1080px; }
+.zenck-formats { max-width: 1080px; }
+
+.zenck-hint {
+	display: inline-block;
+	width: 16px;
+	height: 16px;
+	line-height: 16px;
+	text-align: center;
+	border-radius: 50%;
+	background: #dcdcde;
+	color: #50575e;
+	font-size: 11px;
+	cursor: help;
+}
+
+/* Toggle switch */
+.zenck-switch {
+	position: relative;
+	display: inline-block;
+	width: 40px;
+	height: 22px;
+}
+.zenck-switch input { opacity: 0; width: 0; height: 0; }
+.zenck-slider {
+	position: absolute;
+	cursor: pointer;
+	inset: 0;
+	background: #c3c4c7;
+	border-radius: 22px;
+	transition: .2s;
+}
+.zenck-slider:before {
+	content: "";
+	position: absolute;
+	height: 16px;
+	width: 16px;
+	left: 3px;
+	bottom: 3px;
+	background: #fff;
+	border-radius: 50%;
+	transition: .2s;
+}
+.zenck-switch input:checked + .zenck-slider { background: var(--zenck-accent); }
+.zenck-switch input:checked + .zenck-slider:before { transform: translateX(18px); }
+
+.zenck-result { margin-left: 10px; font-weight: 600; }
+
+.zenck-policy-note {
+	background: #f6f7f7;
+	border: 1px solid #dcdcde;
+	padding: 12px 16px;
+	margin-top: 18px;
+	max-width: 820px;
+}
+.zenck-copy {
+	display: block;
+	background: #fff;
+	border: 1px solid #dcdcde;
+	padding: 10px;
+	margin-top: 8px;
+	white-space: normal;
+}
+
+/* Modal */
+.zenck-modal {
+	position: fixed;
+	inset: 0;
+	background: rgba(0, 0, 0, .5);
+	z-index: 100000;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+}
+.zenck-modal-box {
+	background: #fff;
+	border-radius: 8px;
+	padding: 24px 28px;
+	width: 440px;
+	max-width: 92vw;
+	max-height: 90vh;
+	overflow: auto;
+}
+.zenck-modal-err { color: var(--zenck-warn); min-height: 18px; }
