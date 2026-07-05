@@ -56,6 +56,31 @@
 	}
 
 	/**
+	 * Attribution for an ad landing: the page path, the referrer host and the
+	 * five UTM params. Sent only alongside a non-empty landing (i.e. an ad
+	 * click), never on ordinary page views.
+	 */
+	function readAttrib() {
+		var out = { page: window.location.pathname || '' };
+		try {
+			if (document.referrer) {
+				out.ref = new URL(document.referrer).hostname;
+			}
+		} catch (e) {}
+		try {
+			var sp = new URLSearchParams(window.location.search);
+			var utm = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content'];
+			for (var i = 0; i < utm.length; i++) {
+				var v = sp.get(utm[i]);
+				if (v) {
+					out[utm[i]] = v;
+				}
+			}
+		} catch (e) {}
+		return out;
+	}
+
+	/**
 	 * Derive Consent Mode v2 state. Reads google's consent state if exposed,
 	 * else scans the dataLayer for the latest consent default/update calls.
 	 */
@@ -119,7 +144,7 @@
 
 	function fingerprint(payload) {
 		// Cheap stable key so we don't re-POST an identical state repeatedly.
-		return JSON.stringify([payload.explicit, payload.consent, payload.captured, payload.landing]);
+		return JSON.stringify([payload.explicit, payload.consent, payload.captured, payload.landing, payload.attrib]);
 	}
 
 	function alreadySent(fp) {
@@ -137,6 +162,7 @@
 	}
 
 	function sync() {
+		var landing = readLanding();
 		var payload = {
 			token: cfg.token,
 			cm: 1, // companion marker
@@ -144,8 +170,12 @@
 			consent: readConsent(),
 			consent_version: cfg.consentVersion || '',
 			captured: readCaptured(),
-			landing: readLanding()
+			landing: landing
 		};
+		// Only attach attribution on an actual ad landing.
+		if (Object.keys(landing).length) {
+			payload.attrib = readAttrib();
+		}
 
 		var fp = fingerprint(payload);
 		if (alreadySent(fp)) {

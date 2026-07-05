@@ -4,7 +4,7 @@ Tags: cookies, consent, first-party, analytics, attribution
 Requires at least: 6.2
 Tested up to: 7.0
 Requires PHP: 7.4
-Stable tag: 1.0.4
+Stable tag: 1.1.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -68,6 +68,11 @@ It can optionally consume an inbound `X-JA4` TLS-fingerprint request header for 
 
 == Changelog ==
 
+= 1.1.0 =
+* New: Ad Clicks screen. Every visit that lands with an ad platform click id (Google Ads gclid/wbraid/gbraid/dclid, Microsoft Ads msclkid, Meta fbclid, TikTok ttclid, LinkedIn) is recorded once per session, with landing path, referrer and UTM attribution.
+* New: filter the recorded clicks by date range and platform, a daily per-platform chart, totals, and a CSV export of the list.
+* Recording is gated on advertising consent, matching the ad-cookie policy — nothing is stored without it. Rows honour a configurable retention window (default 365 days) and are removed by the daily cleanup. Erasure and uninstall remove them too.
+
 = 1.0.4 =
 * Admin: more compact Cookies registry screen — fixed-width tables so columns line up across every platform block instead of each block sizing its own columns.
 * Admin: removed the prominent accent rule under each platform title.
@@ -80,6 +85,9 @@ It can optionally consume an inbound `X-JA4` TLS-fingerprint request header for 
 * Initial release: server-side mint / capture / restore of first-party marketing and analytics cookies; HttpOnly anchor with computed lifecycle; per-bucket Consent Mode v2 gating with consent record, withdrawal and erasure; cache-aware uncached write path with exclusions for the major page-cache plugins; cookie registry with custom cookies; diagnostics and self-test; optional JA4/heuristic bot-gating; multisite/multi-domain cookie scoping; daily storage-limitation cleanup.
 
 == Upgrade Notice ==
+
+= 1.1.0 =
+Adds the Ad Clicks stats screen (per-platform totals, chart, filters and CSV export). Consent-gated; adds one database table on upgrade.
 
 = 1.0.1 =
 Fixes anchor durability on return visits. Recommended.

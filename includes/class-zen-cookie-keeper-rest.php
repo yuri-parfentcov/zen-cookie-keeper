@@ -89,6 +89,7 @@ class Zen_Cookie_Keeper_Rest {
         }
         $captured = $this->sanitize_captured($request->get_param('captured'));
         $landing  = $this->sanitize_landing($request->get_param('landing'));
+        $attrib   = $this->sanitize_attrib($request->get_param('attrib'));
         $marker   = (bool) $request->get_param('cm'); // companion marker
 
         // --- Bot gate ---------------------------------------------------
@@ -147,6 +148,14 @@ class Zen_Cookie_Keeper_Rest {
                     Zen_Cookie_Keeper_Consent::handle_withdrawal($anchor_id, $bucket);
                 }
             }
+        }
+
+        // --- Ad-click session record (once per anchor + platform + click id) --
+        // An ad landing carries a click param (gclid / msclkid / fbclid / …).
+        // Recording is gated on the advertising bucket, exactly like the ad
+        // cookie mint below, so it inherits the same consent posture.
+        if (!empty($landing) && !empty($granted['advertising'])) {
+            Zen_Cookie_Keeper_Ad_Clicks::record($anchor_id, $landing, $attrib);
         }
 
         $set     = array();
@@ -302,5 +311,16 @@ class Zen_Cookie_Keeper_Rest {
             }
         }
         return $out;
+    }
+
+    /**
+     * Sanitise the attribution object that accompanies an ad landing: page path,
+     * referrer host and the five UTM parameters. Only honoured server-side when
+     * a click param is present (this method just cleans + length-bounds it).
+     *
+     * @return array
+     */
+    private function sanitize_attrib($raw) {
+        return Zen_Cookie_Keeper_Ad_Clicks::sanitize_attrib($raw);
     }
 }

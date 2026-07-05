@@ -19,7 +19,7 @@ class Zen_Cookie_Keeper_Schema {
     /**
      * Fully-qualified table name for a logical table key.
      *
-     * @param string $key One of: anchors, values, consent, audit, ops.
+     * @param string $key One of: anchors, values, consent, audit, ops, clicks.
      * @return string
      */
     public static function table($key) {
@@ -33,7 +33,7 @@ class Zen_Cookie_Keeper_Schema {
      * @return string[]
      */
     public static function table_keys() {
-        return array('anchors', 'values', 'consent', 'audit', 'ops');
+        return array('anchors', 'values', 'consent', 'audit', 'ops', 'clicks');
     }
 
     /**
@@ -50,6 +50,7 @@ class Zen_Cookie_Keeper_Schema {
         $consent  = self::table('consent');
         $audit    = self::table('audit');
         $ops      = self::table('ops');
+        $clicks   = self::table('clicks');
 
         // 1. Anchors / identities. The browser holds only the raw token; we
         //    store its SHA-256. IP and UA are hashed — never stored raw.
@@ -133,10 +134,36 @@ class Zen_Cookie_Keeper_Schema {
             KEY created_at (created_at)
         ) $charset_collate;";
 
+        // 6. Ad-click sessions — one row per ad-originated landing (deduped per
+        //    anchor + platform + click id). Rich attribution for the stats screen;
+        //    TTL-driven like the rest, purged by the daily cron.
+        $sql_clicks = "CREATE TABLE $clicks (
+            id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            anchor_id BIGINT UNSIGNED NOT NULL,
+            platform VARCHAR(32) NOT NULL DEFAULT '',
+            click_param VARCHAR(32) NOT NULL DEFAULT '',
+            click_id VARCHAR(512) NOT NULL DEFAULT '',
+            landing_path VARCHAR(255) NOT NULL DEFAULT '',
+            referrer_host VARCHAR(191) NOT NULL DEFAULT '',
+            utm_source VARCHAR(128) NOT NULL DEFAULT '',
+            utm_medium VARCHAR(128) NOT NULL DEFAULT '',
+            utm_campaign VARCHAR(191) NOT NULL DEFAULT '',
+            utm_term VARCHAR(191) NOT NULL DEFAULT '',
+            utm_content VARCHAR(191) NOT NULL DEFAULT '',
+            created_at DATETIME NOT NULL DEFAULT '1970-01-01 00:00:00',
+            expires_at DATETIME NOT NULL DEFAULT '1970-01-01 00:00:00',
+            PRIMARY KEY  (id),
+            KEY anchor_platform (anchor_id, platform),
+            KEY platform_created (platform, created_at),
+            KEY created_at (created_at),
+            KEY expires_at (expires_at)
+        ) $charset_collate;";
+
         dbDelta($sql_anchors);
         dbDelta($sql_values);
         dbDelta($sql_consent);
         dbDelta($sql_audit);
         dbDelta($sql_ops);
+        dbDelta($sql_clicks);
     }
 }

@@ -196,6 +196,40 @@ class Zen_Cookie_Keeper_Registry {
     }
 
     /**
+     * Resolve an inbound click-parameter to the ad platform + cookie that owns
+     * it (e.g. 'gclid' => Google Ads / _gcl_aw). Used to label ad-click events.
+     *
+     * @param string $param
+     * @return array|null ['platform' => string, 'cookie' => string] or null.
+     */
+    public static function platform_for_param($param) {
+        foreach (self::get_catalog() as $name => $spec) {
+            if (!empty($spec['param']) && is_array($spec['param']) && in_array($param, $spec['param'], true)) {
+                return array('platform' => $spec['platform'], 'cookie' => $name);
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Distinct ad platforms that own at least one click-parameter — the
+     * taxonomy for the ad-click stats filter dropdown.
+     *
+     * @return string[]
+     */
+    public static function ad_platforms() {
+        $platforms = array();
+        foreach (self::get_catalog() as $spec) {
+            if (!empty($spec['param']) && is_array($spec['param'])) {
+                $platforms[$spec['platform']] = true;
+            }
+        }
+        $names = array_keys($platforms);
+        sort($names);
+        return $names;
+    }
+
+    /**
      * Validate a custom-cookie spec submitted from the admin form.
      *
      * @return array|WP_Error Normalised spec, or error.

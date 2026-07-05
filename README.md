@@ -36,6 +36,19 @@ It keeps your cookies alive in three ways:
 
 Everything is tied together by a single, secure **anchor cookie** that your server manages automatically — it carries no marketing data itself and is never touched by JavaScript.
 
+## See where your ad clicks come from
+
+Because the plugin already recognises every visit that arrives from a paid ad, it can also **keep a simple record of those ad clicks** for you — no analytics account or extra tag required.
+
+The **Ad Clicks** screen shows:
+
+- **Totals** — how many ad clicks you've had, broken down by platform (Google Ads, Microsoft Ads, Meta, TikTok, LinkedIn).
+- **A daily chart** — clicks over time, coloured by platform, so you can see trends and spikes at a glance.
+- **A filterable list** — narrow it down by date range and platform, with the campaign, source, landing page and referrer for each click.
+- **CSV export** — download the filtered list to open in a spreadsheet or share with your team.
+
+Each visit is counted **once per session**, and clicks are recorded only when the visitor has given **advertising consent** — the same rule as the ad cookies. You choose how long the records are kept (365 days by default); anything older is cleaned up automatically.
+
 ## Privacy and consent come first
 
 - **Nothing is set until the visitor consents.** Analytics and advertising are handled separately, and the plugin reads consent from your existing cookie banner through **Google Consent Mode v2** — so it works with Cookiebot, Complianz, Borlabs and other popular banners. Consent enforcement is **on by default**.
@@ -74,6 +87,9 @@ Yes — use the Diagnostics self-test to confirm on your setup.
 
 **Why can't it restore the Google Analytics session cookie?**
 Its format is fragile and restoring it is unreliable and unnecessary. The plugin restores the visitor-identity cookie only, which is what's needed to recognise returning visitors.
+
+**Where does the Ad Clicks data come from, and is it private?**
+It's built entirely from visits to your own site — no third-party account or outside call. A click is only recorded after the visitor gives advertising consent, it's stored on your own server, removed on erasure or uninstall, and automatically deleted once it passes the retention period you set.
 
 ---
 

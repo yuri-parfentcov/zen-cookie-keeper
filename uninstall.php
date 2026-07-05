@@ -19,7 +19,7 @@ function zen_cookie_keeper_uninstall_site() {
     global $wpdb;
 
     // Drop custom tables.
-    $keys = array('anchors', 'values', 'consent', 'audit', 'ops');
+    $keys = array('anchors', 'values', 'consent', 'audit', 'ops', 'clicks');
     foreach ($keys as $key) {
         $table = $wpdb->prefix . 'zen_cookie_keeper_' . $key;
         // Table identifier is code-controlled (fixed prefix + key), not user input.
@@ -42,6 +42,7 @@ function zen_cookie_keeper_uninstall_site() {
         'zen_cookie_keeper_domain_overrides',
         'zen_cookie_keeper_ops_retention_days',
         'zen_cookie_keeper_audit_retention_days',
+        'zen_cookie_keeper_click_retention_days',
     );
     foreach ($options as $option) {
         delete_option($option);

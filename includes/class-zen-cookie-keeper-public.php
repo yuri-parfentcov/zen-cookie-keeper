@@ -117,6 +117,10 @@ class Zen_Cookie_Keeper_Public {
             $emit[]    = $minted['spec'];
         }
 
+        // Record the ad-click session (enforcement is off on this path, so
+        // advertising is treated as granted — same posture as the mint below).
+        Zen_Cookie_Keeper_Ad_Clicks::record($anchor_id, $landing, Zen_Cookie_Keeper_Ad_Clicks::attrib_from_request());
+
         $emit  = isset($emit) ? $emit : array();
         $store = Zen_Cookie_Keeper_Store::instance();
         foreach (Zen_Cookie_Keeper_Registry::get_catalog() as $name => $spec) {

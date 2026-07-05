@@ -48,6 +48,7 @@ class Zen_Cookie_Keeper {
             'class-zen-cookie-keeper-sites.php',
             'class-zen-cookie-keeper-formats.php',
             'class-zen-cookie-keeper-registry.php',
+            'class-zen-cookie-keeper-ad-clicks.php',
             'class-zen-cookie-keeper-emitter.php',
             'class-zen-cookie-keeper-anchor.php',
             'class-zen-cookie-keeper-consent.php',

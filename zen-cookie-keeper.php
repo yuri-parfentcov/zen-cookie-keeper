@@ -3,7 +3,7 @@
  * Plugin Name: Zen Cookie Keeper
  * Plugin URI: https://zenrepublic.agency/zen-cookie-keeper
  * Description: Sets and restores first-party marketing and analytics cookies server-side so they survive Safari ITP / Firefox ETP capping — consent-gated, no server-side GTM, no container. Manages cookies that gtag and ad pixels already create; it does not forward events and makes no outbound third-party calls.
- * Version: 1.0.4
+ * Version: 1.1.0
  * Requires at least: 6.2
  * Requires PHP: 7.4
  * Author: Zen Republic Agency
@@ -18,13 +18,13 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-define('ZEN_COOKIE_KEEPER_VERSION', '1.0.4');
+define('ZEN_COOKIE_KEEPER_VERSION', '1.1.0');
 define('ZEN_COOKIE_KEEPER_FILE', __FILE__);
 define('ZEN_COOKIE_KEEPER_PATH', plugin_dir_path(__FILE__));
 define('ZEN_COOKIE_KEEPER_URL', plugin_dir_url(__FILE__));
 define('ZEN_COOKIE_KEEPER_BASENAME', plugin_basename(__FILE__));
 define('ZEN_COOKIE_KEEPER_TEXT_DOMAIN', 'zen-cookie-keeper');
-define('ZEN_COOKIE_KEEPER_DB_VERSION', '1');
+define('ZEN_COOKIE_KEEPER_DB_VERSION', '2');
 
 // The durable, server-set, HttpOnly anchor cookie name. Deliberately chosen so
 // it is NOT matched by the front cache's guest cookie-strip regex, so it always

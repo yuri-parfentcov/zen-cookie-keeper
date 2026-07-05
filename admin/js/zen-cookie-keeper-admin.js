@@ -138,6 +138,261 @@
 		location.reload();
 	});
 
+	/* ----- Ad Clicks: filter, chart, export, retention ----- */
+	(function () {
+		var $filter = $('#zenck-adclicks-filter');
+		if (!$filter.length) {
+			return; // Not on the Ad Clicks screen.
+		}
+
+		var PLATFORM_COLORS = {
+			'Google Ads': '#34A853',
+			'Microsoft Ads': '#F25022',
+			'Meta': '#1877F2',
+			'TikTok': '#EE1D52',
+			'LinkedIn': '#0A66C2'
+		};
+		var FALLBACK = ['#8E44AD', '#16A085', '#D35400', '#2C3E50', '#7F8C8D', '#C0392B'];
+
+		function colorFor(platform, idx) {
+			return PLATFORM_COLORS[platform] || FALLBACK[idx % FALLBACK.length];
+		}
+
+		function esc(v) {
+			return v === null || v === undefined ? '' : String(v);
+		}
+
+		function currentFilters() {
+			return {
+				from: $filter.find('[name="from"]').val() || '',
+				to: $filter.find('[name="to"]').val() || '',
+				platform: $filter.find('[name="platform"]').val() || ''
+			};
+		}
+
+		function updateExportLink(f) {
+			var base = cfg.exportBase || '';
+			var q = [
+				'action=zen_cookie_keeper_export_clicks',
+				'_wpnonce=' + encodeURIComponent(cfg.exportNonce || ''),
+				'from=' + encodeURIComponent(f.from),
+				'to=' + encodeURIComponent(f.to),
+				'platform=' + encodeURIComponent(f.platform)
+			].join('&');
+			$('#zenck-adclicks-export').attr('href', base + (base.indexOf('?') === -1 ? '?' : '&') + q);
+		}
+
+		/* --- Cards --- */
+		function renderCards(totals, from, to) {
+			$('[data-zenck-total]').text(totals && totals.total ? totals.total : 0);
+			$('[data-zenck-range]').text(from + ' → ' + to);
+			var by = (totals && totals.by_platform) || {};
+			$('[data-zenck-platform-count]').each(function () {
+				var pf = $(this).attr('data-zenck-platform-count');
+				$(this).text(by[pf] ? by[pf] : 0);
+			});
+		}
+
+		/* --- Table --- */
+		function renderTable(rows, count) {
+			var $tbody = $('#zenck-adclicks-table tbody').empty();
+			if (!rows || !rows.length) {
+				$('<tr class="zenck-empty-row"><td colspan="7"></td></tr>')
+					.find('td').text('No ad clicks recorded in this window yet.').end()
+					.appendTo($tbody);
+			} else {
+				for (var i = 0; i < rows.length; i++) {
+					var r = rows[i];
+					var sm = esc(r.source) + (r.medium ? ' / ' + esc(r.medium) : '');
+					sm = sm.replace(/^ \/ /, '');
+					var $tr = $('<tr>');
+					[
+						esc(r.created_at), esc(r.platform), esc(r.campaign), sm,
+						esc(r.landing), esc(r.referrer), esc(r.click_id)
+					].forEach(function (val, idx) {
+						var $td = $('<td>').text(val);
+						if (idx === 4 || idx === 6) {
+							$td.addClass('zenck-ellip');
+						}
+						$tr.append($td);
+					});
+					$tbody.append($tr);
+				}
+			}
+			$('#zenck-adclicks-count').text('Showing ' + (rows ? rows.length : 0) + ' of ' + (count || 0));
+		}
+
+		/* --- Chart: stacked daily bars per platform --- */
+		function drawChart(series) {
+			var canvas = document.getElementById('zenck-adclicks-chart');
+			if (!canvas || !canvas.getContext) {
+				return;
+			}
+			var wrap = canvas.parentNode;
+			var cssW = Math.max(320, wrap.clientWidth || 640);
+			var cssH = 260;
+			var ratio = window.devicePixelRatio || 1;
+			canvas.width = cssW * ratio;
+			canvas.height = cssH * ratio;
+			canvas.style.width = cssW + 'px';
+			canvas.style.height = cssH + 'px';
+			var ctx = canvas.getContext('2d');
+			ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+			ctx.clearRect(0, 0, cssW, cssH);
+
+			series = series || [];
+			// Pivot into days[] and platforms[] with a counts map.
+			var dayOrder = [];
+			var daySeen = {};
+			var pfSeen = {};
+			var counts = {}; // day -> platform -> n
+			for (var i = 0; i < series.length; i++) {
+				var d = String(series[i].day);
+				var p = String(series[i].platform);
+				var n = parseInt(series[i].n, 10) || 0;
+				if (!daySeen[d]) { daySeen[d] = true; dayOrder.push(d); }
+				pfSeen[p] = true;
+				if (!counts[d]) { counts[d] = {}; }
+				counts[d][p] = (counts[d][p] || 0) + n;
+			}
+			dayOrder.sort();
+			var platforms = Object.keys(pfSeen).sort();
+
+			var padL = 34, padR = 10, padT = 12, padB = 28;
+			var plotW = cssW - padL - padR;
+			var plotH = cssH - padT - padB;
+
+			// Max stacked total per day.
+			var maxV = 0;
+			for (var di = 0; di < dayOrder.length; di++) {
+				var tot = 0;
+				var cd = counts[dayOrder[di]] || {};
+				for (var pk in cd) { if (cd.hasOwnProperty(pk)) { tot += cd[pk]; } }
+				if (tot > maxV) { maxV = tot; }
+			}
+			if (maxV <= 0) { maxV = 1; }
+
+			var textColor = '#50575e';
+			var gridColor = '#dcdcde';
+
+			// Axes / gridlines (4 steps).
+			ctx.strokeStyle = gridColor;
+			ctx.fillStyle = textColor;
+			ctx.font = '11px sans-serif';
+			ctx.textAlign = 'right';
+			ctx.textBaseline = 'middle';
+			var steps = 4;
+			for (var s = 0; s <= steps; s++) {
+				var val = Math.round(maxV * s / steps);
+				var y = padT + plotH - (plotH * s / steps);
+				ctx.beginPath();
+				ctx.moveTo(padL, y);
+				ctx.lineTo(cssW - padR, y);
+				ctx.stroke();
+				ctx.fillText(String(val), padL - 6, y);
+			}
+
+			if (!dayOrder.length) {
+				ctx.textAlign = 'center';
+				ctx.fillText('No data in range', padL + plotW / 2, padT + plotH / 2);
+				renderLegend(platforms);
+				return;
+			}
+
+			var slot = plotW / dayOrder.length;
+			var barW = Math.max(2, Math.min(28, slot * 0.7));
+			ctx.textAlign = 'center';
+			ctx.textBaseline = 'top';
+
+			for (var d2 = 0; d2 < dayOrder.length; d2++) {
+				var day = dayOrder[d2];
+				var cx = padL + slot * d2 + slot / 2;
+				var yBase = padT + plotH;
+				var stack = counts[day] || {};
+				for (var pi = 0; pi < platforms.length; pi++) {
+					var pf = platforms[pi];
+					var v = stack[pf] || 0;
+					if (v <= 0) { continue; }
+					var h = (v / maxV) * plotH;
+					ctx.fillStyle = colorFor(pf, pi);
+					ctx.fillRect(cx - barW / 2, yBase - h, barW, h);
+					yBase -= h;
+				}
+				// Sparse x labels (~ up to 8).
+				var every = Math.ceil(dayOrder.length / 8);
+				if (d2 % every === 0) {
+					ctx.fillStyle = textColor;
+					ctx.fillText(day.slice(5), cx, padT + plotH + 6);
+				}
+			}
+			renderLegend(platforms);
+		}
+
+		function renderLegend(platforms) {
+			var $legend = $('#zenck-adclicks-legend').empty();
+			for (var i = 0; i < platforms.length; i++) {
+				var $item = $('<span class="zenck-legend-item">');
+				$('<span class="zenck-legend-swatch">').css('background', colorFor(platforms[i], i)).appendTo($item);
+				$('<span>').text(platforms[i]).appendTo($item);
+				$legend.append($item);
+			}
+		}
+
+		var lastSeries = [];
+
+		function refresh() {
+			var f = currentFilters();
+			var $status = $('#zenck-adclicks-status');
+			$status.text('…').removeClass('zenck-ok zenck-warn');
+			updateExportLink(f);
+			post('refresh_adclicks', f, function (res) {
+				if (!res || !res.success) {
+					flash($status, false, res && res.data && res.data.message);
+					return;
+				}
+				var d = res.data;
+				renderCards(d.totals, d.from, d.to);
+				renderTable(d.rows, d.count);
+				lastSeries = d.series || [];
+				drawChart(lastSeries);
+				$status.text('');
+			});
+		}
+
+		$filter.on('submit', function (e) {
+			e.preventDefault();
+			refresh();
+		});
+
+		$(document).on('submit', '#zenck-adclicks-retention', function (e) {
+			e.preventDefault();
+			post('save_adclicks', {
+				retention_days: parseInt($(this).find('[name="retention_days"]').val(), 10) || 1
+			}, function (res) {
+				flash($('#zenck-adclicks-retention-result'), !!res.success);
+			});
+		});
+
+		var resizeTimer;
+		$(window).on('resize', function () {
+			clearTimeout(resizeTimer);
+			resizeTimer = setTimeout(function () { drawChart(lastSeries); }, 150);
+		});
+
+		// Initial paint from the server-embedded bootstrap data.
+		$(function () {
+			var raw = document.getElementById('zenck-adclicks-data');
+			if (raw) {
+				try {
+					var boot = JSON.parse(raw.textContent || '{}');
+					lastSeries = boot.series || [];
+					updateExportLink(currentFilters());
+					drawChart(lastSeries);
+				} catch (e) {}
+			}
+		});
+	})();
+
 	/* ----- Self-test (runs against the public REST endpoint) ----- */
 	$(document).on('click', '#zenck-selftest', function () {
 		var $r = $('#zenck-selftest-result');

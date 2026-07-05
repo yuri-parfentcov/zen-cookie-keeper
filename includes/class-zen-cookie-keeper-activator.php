@@ -65,6 +65,8 @@ class Zen_Cookie_Keeper_Activator {
             'zen_cookie_keeper_bot_gate_enabled'  => 0,
             'zen_cookie_keeper_bot_ja4_denylist'  => array(),
             'zen_cookie_keeper_bot_ja4_allowlist' => array(),
+            // Retention (days) for recorded ad-click sessions on the stats screen.
+            'zen_cookie_keeper_click_retention_days' => 365,
         );
 
         foreach ($defaults as $key => $value) {

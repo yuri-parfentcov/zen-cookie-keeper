@@ -27,10 +27,14 @@ class Zen_Cookie_Keeper_Admin {
             'toggle_cookie', 'save_override', 'add_custom', 'delete_custom',
             'save_consent', 'save_botgate', 'save_formats', 'save_domain',
             'erasure', 'refresh_diagnostics', 'rotate_token',
+            'refresh_adclicks', 'save_adclicks',
         );
         foreach ($ajax as $action) {
             add_action('wp_ajax_zen_cookie_keeper_' . $action, array($this, 'ajax_' . $action));
         }
+
+        // CSV export is a file download, so it goes through admin-post (not AJAX).
+        add_action('admin_post_zen_cookie_keeper_export_clicks', array($this, 'export_clicks'));
     }
 
     /* ----------------------------------------------------------------- Menu */
@@ -49,6 +53,7 @@ class Zen_Cookie_Keeper_Admin {
             'zen-cookie-keeper'             => __('Overview', 'zen-cookie-keeper'),
             'zen-cookie-keeper-cookies'     => __('Cookies', 'zen-cookie-keeper'),
             'zen-cookie-keeper-consent'     => __('Consent', 'zen-cookie-keeper'),
+            'zen-cookie-keeper-adclicks'    => __('Ad Clicks', 'zen-cookie-keeper'),
             'zen-cookie-keeper-diagnostics' => __('Diagnostics', 'zen-cookie-keeper'),
             'zen-cookie-keeper-sites'       => __('Sites', 'zen-cookie-keeper'),
         );
@@ -56,6 +61,7 @@ class Zen_Cookie_Keeper_Admin {
             'zen-cookie-keeper'             => 'render_overview',
             'zen-cookie-keeper-cookies'     => 'render_cookies',
             'zen-cookie-keeper-consent'     => 'render_consent',
+            'zen-cookie-keeper-adclicks'    => 'render_adclicks',
             'zen-cookie-keeper-diagnostics' => 'render_diagnostics',
             'zen-cookie-keeper-sites'       => 'render_sites',
         );
@@ -86,6 +92,8 @@ class Zen_Cookie_Keeper_Admin {
             'nonce'        => wp_create_nonce(self::NONCE),
             'selftestUrl'  => esc_url_raw(rest_url(Zen_Cookie_Keeper_Rest::NS . '/selftest')),
             'siteToken'    => (string) get_option('zen_cookie_keeper_site_token', ''),
+            'exportBase'   => esc_url_raw(admin_url('admin-post.php')),
+            'exportNonce'  => wp_create_nonce('zen_cookie_keeper_export'),
             'i18n'    => array(
                 'confirmDisableEnforce' => __('Turning off consent enforcement means cookies may be set without consent. This is a compliance risk and can fail review. Are you sure?', 'zen-cookie-keeper'),
                 'confirmErasure'        => __('Permanently erase all stored data under this identifier? This cannot be undone.', 'zen-cookie-keeper'),
@@ -128,6 +136,24 @@ class Zen_Cookie_Keeper_Admin {
             'botgate'   => (bool) get_option('zen_cookie_keeper_bot_gate_enabled', 0),
             'denylist'  => (array) get_option('zen_cookie_keeper_bot_ja4_denylist', array()),
             'allowlist' => (array) get_option('zen_cookie_keeper_bot_ja4_allowlist', array()),
+        ));
+    }
+
+    public function render_adclicks() {
+        $to      = gmdate('Y-m-d');
+        $from    = gmdate('Y-m-d', time() - (29 * DAY_IN_SECONDS));
+        $data    = $this->adclicks_data($from, $to, '');
+
+        $this->view('adclicks-page', array(
+            'from'      => $from,
+            'to'        => $to,
+            'platform'  => '',
+            'platforms' => Zen_Cookie_Keeper_Registry::ad_platforms(),
+            'totals'    => $data['totals'],
+            'series'    => $data['series'],
+            'rows'      => $data['rows'],
+            'count'     => $data['count'],
+            'retention' => (int) get_option('zen_cookie_keeper_click_retention_days', 365),
         ));
     }
 
@@ -342,6 +368,132 @@ class Zen_Cookie_Keeper_Admin {
         $token = wp_generate_password(40, false, false);
         update_option('zen_cookie_keeper_site_token', $token);
         wp_send_json_success(array('token' => $token));
+    }
+
+    /* ----------------------------------------------------------- Ad clicks */
+
+    /**
+     * Gather the stats bundle for a filter window. Dates are calendar days
+     * (Y-m-d) expanded to full GMT-day bounds against the GMT created_at column.
+     *
+     * @return array{totals:array, series:array, rows:array, count:int}
+     */
+    private function adclicks_data($from_date, $to_date, $platform) {
+        $store = Zen_Cookie_Keeper_Store::instance();
+        $from  = $from_date . ' 00:00:00';
+        $to    = $to_date . ' 23:59:59';
+        return array(
+            'totals' => $store->click_totals($from, $to, $platform),
+            'series' => $store->click_timeseries($from, $to, $platform),
+            'rows'   => $store->click_list($from, $to, $platform, 200, 0),
+            'count'  => $store->click_list_count($from, $to, $platform),
+        );
+    }
+
+    private function sanitize_date($val, $fallback) {
+        $val = sanitize_text_field((string) $val);
+        return preg_match('/^\d{4}-\d{2}-\d{2}$/', $val) ? $val : $fallback;
+    }
+
+    private function sanitize_platform($val) {
+        $val = sanitize_text_field((string) $val);
+        if ($val === '') {
+            return '';
+        }
+        return in_array($val, Zen_Cookie_Keeper_Registry::ad_platforms(), true) ? $val : '';
+    }
+
+    /**
+     * Shape a stored click row into the display fields the table/JS use.
+     *
+     * @return array
+     */
+    private function format_click_row($row) {
+        return array(
+            'created_at' => (string) $row['created_at'],
+            'platform'   => (string) $row['platform'],
+            'campaign'   => (string) $row['utm_campaign'],
+            'source'     => (string) $row['utm_source'],
+            'medium'     => (string) $row['utm_medium'],
+            'landing'    => (string) $row['landing_path'],
+            'referrer'   => (string) $row['referrer_host'],
+            'click_id'   => (string) $row['click_id'],
+        );
+    }
+
+    public function ajax_refresh_adclicks() {
+        $this->guard();
+        $to       = $this->sanitize_date($this->post('to'), gmdate('Y-m-d'));
+        $from     = $this->sanitize_date($this->post('from'), gmdate('Y-m-d', time() - (29 * DAY_IN_SECONDS)));
+        $platform = $this->sanitize_platform($this->post('platform'));
+
+        $data = $this->adclicks_data($from, $to, $platform);
+        wp_send_json_success(array(
+            'from'     => $from,
+            'to'       => $to,
+            'platform' => $platform,
+            'totals'   => $data['totals'],
+            'series'   => $data['series'],
+            'rows'     => array_map(array($this, 'format_click_row'), $data['rows']),
+            'count'    => (int) $data['count'],
+        ));
+    }
+
+    public function ajax_save_adclicks() {
+        $this->guard();
+        $days = max(1, (int) $this->post('retention_days'));
+        update_option('zen_cookie_keeper_click_retention_days', $days);
+        wp_send_json_success(array('retention' => $days));
+    }
+
+    /**
+     * Stream the filtered ad-click list as a CSV download. Uses admin-post
+     * because a file download cannot ride an AJAX JSON response.
+     */
+    public function export_clicks() {
+        if (!current_user_can(self::CAP)) {
+            wp_die(esc_html__('Unauthorized', 'zen-cookie-keeper'), '', array('response' => 403));
+        }
+        check_admin_referer('zen_cookie_keeper_export');
+
+        // Filters arrive on the query string; the nonce above (check_admin_referer)
+        // authenticates the request and each value is strictly sanitised here.
+        $to       = $this->sanitize_date(isset($_GET['to']) ? sanitize_text_field(wp_unslash($_GET['to'])) : '', gmdate('Y-m-d'));
+        $from     = $this->sanitize_date(isset($_GET['from']) ? sanitize_text_field(wp_unslash($_GET['from'])) : '', gmdate('Y-m-d', time() - (29 * DAY_IN_SECONDS)));
+        $platform = $this->sanitize_platform(isset($_GET['platform']) ? sanitize_text_field(wp_unslash($_GET['platform'])) : '');
+
+        $store   = Zen_Cookie_Keeper_Store::instance();
+        $from_dt = $from . ' 00:00:00';
+        $to_dt   = $to . ' 23:59:59';
+
+        nocache_headers();
+        header('Content-Type: text/csv; charset=utf-8');
+        header('Content-Disposition: attachment; filename=zenck-adclicks-' . gmdate('Ymd-His') . '.csv');
+
+        // php://output is the correct sink for a streamed download; WP_Filesystem
+        // does not apply to a live HTTP response body.
+        $handle = fopen('php://output', 'w'); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fopen
+        fputcsv($handle, array(
+            'recorded_at_utc', 'platform', 'click_param', 'click_id', 'landing_path',
+            'referrer_host', 'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content',
+        ));
+
+        $limit  = 1000;
+        $offset = 0;
+        do {
+            $rows = $store->click_list($from_dt, $to_dt, $platform, $limit, $offset);
+            foreach ($rows as $r) {
+                fputcsv($handle, array(
+                    $r['created_at'], $r['platform'], $r['click_param'], $r['click_id'],
+                    $r['landing_path'], $r['referrer_host'], $r['utm_source'], $r['utm_medium'],
+                    $r['utm_campaign'], $r['utm_term'], $r['utm_content'],
+                ));
+            }
+            $offset += $limit;
+        } while (count($rows) === $limit);
+
+        fclose($handle); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose
+        exit;
     }
 
     private function lines_to_array($text) {

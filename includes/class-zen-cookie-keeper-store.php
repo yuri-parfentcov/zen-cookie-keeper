@@ -105,6 +105,7 @@ class Zen_Cookie_Keeper_Store {
         $anchor_id = (int) $anchor_id;
         $wpdb->delete($this->t('values'),  array('anchor_id' => $anchor_id), array('%d'));
         $wpdb->delete($this->t('consent'), array('anchor_id' => $anchor_id), array('%d'));
+        $wpdb->delete($this->t('clicks'),  array('anchor_id' => $anchor_id), array('%d'));
         $wpdb->delete($this->t('anchors'), array('id' => $anchor_id), array('%d'));
     }
 
@@ -282,6 +283,201 @@ class Zen_Cookie_Keeper_Store {
     }
 
     /* ---------------------------------------------------------------------
+     * Ad-click sessions
+     * ------------------------------------------------------------------- */
+
+    /**
+     * Record an ad-originated session exactly once per anchor + platform +
+     * click id. Repeated companion POSTs for the same landing are idempotent.
+     *
+     * @param int   $anchor_id
+     * @param array $data platform, click_param, click_id, landing_path,
+     *                    referrer_host, utm_source, utm_medium, utm_campaign,
+     *                    utm_term, utm_content
+     * @param int   $ttl_seconds Retention window from now.
+     * @return string 'inserted' | 'exists' | 'failed'
+     */
+    public function record_click_once($anchor_id, $data, $ttl_seconds) {
+        global $wpdb;
+        $anchor_id = (int) $anchor_id;
+        $platform  = isset($data['platform']) ? (string) $data['platform'] : '';
+        $click_id  = isset($data['click_id']) ? (string) $data['click_id'] : '';
+
+        $exists = $wpdb->get_var(
+            $wpdb->prepare(
+                'SELECT id FROM ' . $this->t('clicks') . ' WHERE anchor_id = %d AND platform = %s AND click_id = %s LIMIT 1',
+                $anchor_id,
+                $platform,
+                $click_id
+            )
+        );
+        if ($exists) {
+            return 'exists';
+        }
+
+        $ok = $wpdb->insert(
+            $this->t('clicks'),
+            array(
+                'anchor_id'     => $anchor_id,
+                'platform'      => $platform,
+                'click_param'   => isset($data['click_param']) ? (string) $data['click_param'] : '',
+                'click_id'      => $click_id,
+                'landing_path'  => isset($data['landing_path']) ? (string) $data['landing_path'] : '',
+                'referrer_host' => isset($data['referrer_host']) ? (string) $data['referrer_host'] : '',
+                'utm_source'    => isset($data['utm_source']) ? (string) $data['utm_source'] : '',
+                'utm_medium'    => isset($data['utm_medium']) ? (string) $data['utm_medium'] : '',
+                'utm_campaign'  => isset($data['utm_campaign']) ? (string) $data['utm_campaign'] : '',
+                'utm_term'      => isset($data['utm_term']) ? (string) $data['utm_term'] : '',
+                'utm_content'   => isset($data['utm_content']) ? (string) $data['utm_content'] : '',
+                'created_at'    => $this->now(),
+                'expires_at'    => gmdate('Y-m-d H:i:s', time() + (int) $ttl_seconds),
+            ),
+            array('%d', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s')
+        );
+
+        return $ok ? 'inserted' : 'failed';
+    }
+
+    /**
+     * Totals for the stats screen: grand total plus a per-platform breakdown,
+     * for the [$from, $to] window (GMT datetimes) and optional platform filter.
+     *
+     * @return array{total:int, by_platform:array<string,int>}
+     */
+    public function click_totals($from, $to, $platform = '') {
+        global $wpdb;
+        $table = $this->t('clicks');
+
+        if ($platform !== '') {
+            $rows = $wpdb->get_results(
+                $wpdb->prepare(
+                    'SELECT platform, COUNT(*) AS n FROM ' . $table . ' WHERE created_at >= %s AND created_at <= %s AND platform = %s GROUP BY platform',
+                    $from,
+                    $to,
+                    $platform
+                ),
+                ARRAY_A
+            );
+        } else {
+            $rows = $wpdb->get_results(
+                $wpdb->prepare(
+                    'SELECT platform, COUNT(*) AS n FROM ' . $table . ' WHERE created_at >= %s AND created_at <= %s GROUP BY platform',
+                    $from,
+                    $to
+                ),
+                ARRAY_A
+            );
+        }
+
+        $by_platform = array();
+        $total       = 0;
+        foreach ((array) $rows as $row) {
+            $n = (int) $row['n'];
+            $by_platform[(string) $row['platform']] = $n;
+            $total += $n;
+        }
+        return array('total' => $total, 'by_platform' => $by_platform);
+    }
+
+    /**
+     * Daily time-series for the chart: one count per (day, platform) bucket in
+     * the window. Day is the GMT calendar date of created_at.
+     *
+     * @return array<int,array{day:string, platform:string, n:int}>
+     */
+    public function click_timeseries($from, $to, $platform = '') {
+        global $wpdb;
+        $table = $this->t('clicks');
+
+        if ($platform !== '') {
+            return $wpdb->get_results(
+                $wpdb->prepare(
+                    'SELECT DATE(created_at) AS day, platform, COUNT(*) AS n FROM ' . $table . ' WHERE created_at >= %s AND created_at <= %s AND platform = %s GROUP BY day, platform ORDER BY day ASC',
+                    $from,
+                    $to,
+                    $platform
+                ),
+                ARRAY_A
+            );
+        }
+
+        return $wpdb->get_results(
+            $wpdb->prepare(
+                'SELECT DATE(created_at) AS day, platform, COUNT(*) AS n FROM ' . $table . ' WHERE created_at >= %s AND created_at <= %s GROUP BY day, platform ORDER BY day ASC',
+                $from,
+                $to
+            ),
+            ARRAY_A
+        );
+    }
+
+    /**
+     * Paginated click rows for the table and CSV export (newest first).
+     *
+     * @return array<int,array<string,mixed>>
+     */
+    public function click_list($from, $to, $platform, $limit, $offset) {
+        global $wpdb;
+        $table  = $this->t('clicks');
+        $limit  = max(1, (int) $limit);
+        $offset = max(0, (int) $offset);
+
+        if ($platform !== '') {
+            return $wpdb->get_results(
+                $wpdb->prepare(
+                    'SELECT * FROM ' . $table . ' WHERE created_at >= %s AND created_at <= %s AND platform = %s ORDER BY created_at DESC, id DESC LIMIT %d OFFSET %d',
+                    $from,
+                    $to,
+                    $platform,
+                    $limit,
+                    $offset
+                ),
+                ARRAY_A
+            );
+        }
+
+        return $wpdb->get_results(
+            $wpdb->prepare(
+                'SELECT * FROM ' . $table . ' WHERE created_at >= %s AND created_at <= %s ORDER BY created_at DESC, id DESC LIMIT %d OFFSET %d',
+                $from,
+                $to,
+                $limit,
+                $offset
+            ),
+            ARRAY_A
+        );
+    }
+
+    /**
+     * Total row count matching the filter (for pagination).
+     *
+     * @return int
+     */
+    public function click_list_count($from, $to, $platform = '') {
+        global $wpdb;
+        $table = $this->t('clicks');
+
+        if ($platform !== '') {
+            return (int) $wpdb->get_var(
+                $wpdb->prepare(
+                    'SELECT COUNT(*) FROM ' . $table . ' WHERE created_at >= %s AND created_at <= %s AND platform = %s',
+                    $from,
+                    $to,
+                    $platform
+                )
+            );
+        }
+
+        return (int) $wpdb->get_var(
+            $wpdb->prepare(
+                'SELECT COUNT(*) FROM ' . $table . ' WHERE created_at >= %s AND created_at <= %s',
+                $from,
+                $to
+            )
+        );
+    }
+
+    /* ---------------------------------------------------------------------
      * Cron purge (storage limitation)
      * ------------------------------------------------------------------- */
 
@@ -302,6 +498,9 @@ class Zen_Cookie_Keeper_Store {
         $deleted['consent'] = $wpdb->query(
             $wpdb->prepare('DELETE FROM ' . $this->t('consent') . ' WHERE expires_at < %s', $now)
         );
+        $deleted['clicks'] = $wpdb->query(
+            $wpdb->prepare('DELETE FROM ' . $this->t('clicks') . ' WHERE expires_at < %s', $now)
+        );
         $deleted['anchors'] = $wpdb->query(
             $wpdb->prepare('DELETE FROM ' . $this->t('anchors') . ' WHERE expires_at < %s', $now)
         );
@@ -320,6 +519,7 @@ class Zen_Cookie_Keeper_Store {
         $anchors = $this->t('anchors');
         $wpdb->query('DELETE v FROM ' . $this->t('values') . ' v LEFT JOIN ' . $anchors . ' a ON v.anchor_id = a.id WHERE a.id IS NULL');
         $wpdb->query('DELETE c FROM ' . $this->t('consent') . ' c LEFT JOIN ' . $anchors . ' a ON c.anchor_id = a.id WHERE a.id IS NULL');
+        $wpdb->query('DELETE k FROM ' . $this->t('clicks') . ' k LEFT JOIN ' . $anchors . ' a ON k.anchor_id = a.id WHERE a.id IS NULL');
 
         return $deleted;
     }
