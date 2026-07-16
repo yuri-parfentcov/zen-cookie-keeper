@@ -190,8 +190,9 @@
 }
 .zenck-modal-err { color: var(--zenck-warn); min-height: 18px; }
 
-/* --- Ad Clicks --- */
-.zenck-adclicks .zenck-lead { max-width: 900px; }
+/* --- Ad Clicks / Restore History (shared stats-screen layout) --- */
+.zenck-adclicks .zenck-lead,
+.zenck-restores .zenck-lead { max-width: 900px; }
 .zenck-card-platform h2 { font-size: 12px; }
 
 .zenck-adclicks-filter {
@@ -214,7 +215,8 @@
 }
 .zenck-adclicks-filter input[type="date"],
 .zenck-adclicks-filter select { min-width: 150px; }
-.zenck-adclicks-filter #zenck-adclicks-export { margin-left: auto; }
+.zenck-adclicks-filter #zenck-adclicks-export,
+.zenck-adclicks-filter #zenck-restores-export { margin-left: auto; }
 
 .zenck-chart-wrap {
 	background: #fff;

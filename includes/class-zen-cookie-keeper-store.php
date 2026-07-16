@@ -103,10 +103,11 @@ class Zen_Cookie_Keeper_Store {
     public function purge_anchor($anchor_id) {
         global $wpdb;
         $anchor_id = (int) $anchor_id;
-        $wpdb->delete($this->t('values'),  array('anchor_id' => $anchor_id), array('%d'));
-        $wpdb->delete($this->t('consent'), array('anchor_id' => $anchor_id), array('%d'));
-        $wpdb->delete($this->t('clicks'),  array('anchor_id' => $anchor_id), array('%d'));
-        $wpdb->delete($this->t('anchors'), array('id' => $anchor_id), array('%d'));
+        $wpdb->delete($this->t('values'),   array('anchor_id' => $anchor_id), array('%d'));
+        $wpdb->delete($this->t('consent'),  array('anchor_id' => $anchor_id), array('%d'));
+        $wpdb->delete($this->t('clicks'),   array('anchor_id' => $anchor_id), array('%d'));
+        $wpdb->delete($this->t('restores'), array('anchor_id' => $anchor_id), array('%d'));
+        $wpdb->delete($this->t('anchors'),  array('id' => $anchor_id), array('%d'));
     }
 
     /* ---------------------------------------------------------------------
@@ -478,6 +479,191 @@ class Zen_Cookie_Keeper_Store {
     }
 
     /* ---------------------------------------------------------------------
+     * Restore history
+     * ------------------------------------------------------------------- */
+
+    /**
+     * Record one restore event. Unlike clicks there is no dedup: every
+     * re-emission IS the event the history report counts.
+     *
+     * @param int   $anchor_id
+     * @param array $data cookie_name, bucket, platform, reason
+     *                    ('missing'|'divergent'), value_age (seconds since
+     *                    first_seen at restore time), remaining_lifetime.
+     * @param int   $ttl_seconds Retention window from now.
+     * @return bool
+     */
+    public function record_restore($anchor_id, $data, $ttl_seconds) {
+        global $wpdb;
+        return (bool) $wpdb->insert(
+            $this->t('restores'),
+            array(
+                'anchor_id'          => (int) $anchor_id,
+                'cookie_name'        => isset($data['cookie_name']) ? (string) $data['cookie_name'] : '',
+                'bucket'             => isset($data['bucket']) ? (string) $data['bucket'] : '',
+                'platform'           => isset($data['platform']) ? (string) $data['platform'] : '',
+                'reason'             => isset($data['reason']) ? (string) $data['reason'] : '',
+                'value_age'          => isset($data['value_age']) ? max(0, (int) $data['value_age']) : 0,
+                'remaining_lifetime' => isset($data['remaining_lifetime']) ? max(0, (int) $data['remaining_lifetime']) : 0,
+                'created_at'         => $this->now(),
+                'expires_at'         => gmdate('Y-m-d H:i:s', time() + (int) $ttl_seconds),
+            ),
+            array('%d', '%s', '%s', '%s', '%s', '%d', '%d', '%s', '%s')
+        );
+    }
+
+    /**
+     * Totals for the restore-history screen: grand total, per-cookie and
+     * per-reason breakdowns, and the average recovered-identity age, for the
+     * [$from, $to] window (GMT datetimes) and optional cookie filter.
+     *
+     * @return array{total:int, by_cookie:array<string,int>, by_reason:array<string,int>, avg_age:int}
+     */
+    public function restore_totals($from, $to, $cookie = '') {
+        global $wpdb;
+        $table = $this->t('restores');
+
+        if ($cookie !== '') {
+            $rows = $wpdb->get_results(
+                $wpdb->prepare(
+                    'SELECT cookie_name, reason, COUNT(*) AS n, AVG(value_age) AS avg_age FROM ' . $table . ' WHERE created_at >= %s AND created_at <= %s AND cookie_name = %s GROUP BY cookie_name, reason',
+                    $from,
+                    $to,
+                    $cookie
+                ),
+                ARRAY_A
+            );
+        } else {
+            $rows = $wpdb->get_results(
+                $wpdb->prepare(
+                    'SELECT cookie_name, reason, COUNT(*) AS n, AVG(value_age) AS avg_age FROM ' . $table . ' WHERE created_at >= %s AND created_at <= %s GROUP BY cookie_name, reason',
+                    $from,
+                    $to
+                ),
+                ARRAY_A
+            );
+        }
+
+        $by_cookie = array();
+        $by_reason = array();
+        $total     = 0;
+        $age_sum   = 0.0;
+        foreach ((array) $rows as $row) {
+            $n    = (int) $row['n'];
+            $name = (string) $row['cookie_name'];
+            $why  = (string) $row['reason'];
+            $by_cookie[$name] = isset($by_cookie[$name]) ? $by_cookie[$name] + $n : $n;
+            $by_reason[$why]  = isset($by_reason[$why]) ? $by_reason[$why] + $n : $n;
+            $total   += $n;
+            $age_sum += (float) $row['avg_age'] * $n;
+        }
+        return array(
+            'total'     => $total,
+            'by_cookie' => $by_cookie,
+            'by_reason' => $by_reason,
+            'avg_age'   => $total > 0 ? (int) round($age_sum / $total) : 0,
+        );
+    }
+
+    /**
+     * Daily time-series for the chart: one count per (day, cookie) bucket in
+     * the window. Day is the GMT calendar date of created_at.
+     *
+     * @return array<int,array{day:string, cookie_name:string, n:int}>
+     */
+    public function restore_timeseries($from, $to, $cookie = '') {
+        global $wpdb;
+        $table = $this->t('restores');
+
+        if ($cookie !== '') {
+            return $wpdb->get_results(
+                $wpdb->prepare(
+                    'SELECT DATE(created_at) AS day, cookie_name, COUNT(*) AS n FROM ' . $table . ' WHERE created_at >= %s AND created_at <= %s AND cookie_name = %s GROUP BY day, cookie_name ORDER BY day ASC',
+                    $from,
+                    $to,
+                    $cookie
+                ),
+                ARRAY_A
+            );
+        }
+
+        return $wpdb->get_results(
+            $wpdb->prepare(
+                'SELECT DATE(created_at) AS day, cookie_name, COUNT(*) AS n FROM ' . $table . ' WHERE created_at >= %s AND created_at <= %s GROUP BY day, cookie_name ORDER BY day ASC',
+                $from,
+                $to
+            ),
+            ARRAY_A
+        );
+    }
+
+    /**
+     * Paginated restore rows for the table and CSV export (newest first).
+     *
+     * @return array<int,array<string,mixed>>
+     */
+    public function restore_list($from, $to, $cookie, $limit, $offset) {
+        global $wpdb;
+        $table  = $this->t('restores');
+        $limit  = max(1, (int) $limit);
+        $offset = max(0, (int) $offset);
+
+        if ($cookie !== '') {
+            return $wpdb->get_results(
+                $wpdb->prepare(
+                    'SELECT * FROM ' . $table . ' WHERE created_at >= %s AND created_at <= %s AND cookie_name = %s ORDER BY created_at DESC, id DESC LIMIT %d OFFSET %d',
+                    $from,
+                    $to,
+                    $cookie,
+                    $limit,
+                    $offset
+                ),
+                ARRAY_A
+            );
+        }
+
+        return $wpdb->get_results(
+            $wpdb->prepare(
+                'SELECT * FROM ' . $table . ' WHERE created_at >= %s AND created_at <= %s ORDER BY created_at DESC, id DESC LIMIT %d OFFSET %d',
+                $from,
+                $to,
+                $limit,
+                $offset
+            ),
+            ARRAY_A
+        );
+    }
+
+    /**
+     * Total restore-row count matching the filter (for pagination).
+     *
+     * @return int
+     */
+    public function restore_list_count($from, $to, $cookie = '') {
+        global $wpdb;
+        $table = $this->t('restores');
+
+        if ($cookie !== '') {
+            return (int) $wpdb->get_var(
+                $wpdb->prepare(
+                    'SELECT COUNT(*) FROM ' . $table . ' WHERE created_at >= %s AND created_at <= %s AND cookie_name = %s',
+                    $from,
+                    $to,
+                    $cookie
+                )
+            );
+        }
+
+        return (int) $wpdb->get_var(
+            $wpdb->prepare(
+                'SELECT COUNT(*) FROM ' . $table . ' WHERE created_at >= %s AND created_at <= %s',
+                $from,
+                $to
+            )
+        );
+    }
+
+    /* ---------------------------------------------------------------------
      * Cron purge (storage limitation)
      * ------------------------------------------------------------------- */
 
@@ -501,6 +687,9 @@ class Zen_Cookie_Keeper_Store {
         $deleted['clicks'] = $wpdb->query(
             $wpdb->prepare('DELETE FROM ' . $this->t('clicks') . ' WHERE expires_at < %s', $now)
         );
+        $deleted['restores'] = $wpdb->query(
+            $wpdb->prepare('DELETE FROM ' . $this->t('restores') . ' WHERE expires_at < %s', $now)
+        );
         $deleted['anchors'] = $wpdb->query(
             $wpdb->prepare('DELETE FROM ' . $this->t('anchors') . ' WHERE expires_at < %s', $now)
         );
@@ -520,6 +709,7 @@ class Zen_Cookie_Keeper_Store {
         $wpdb->query('DELETE v FROM ' . $this->t('values') . ' v LEFT JOIN ' . $anchors . ' a ON v.anchor_id = a.id WHERE a.id IS NULL');
         $wpdb->query('DELETE c FROM ' . $this->t('consent') . ' c LEFT JOIN ' . $anchors . ' a ON c.anchor_id = a.id WHERE a.id IS NULL');
         $wpdb->query('DELETE k FROM ' . $this->t('clicks') . ' k LEFT JOIN ' . $anchors . ' a ON k.anchor_id = a.id WHERE a.id IS NULL');
+        $wpdb->query('DELETE r FROM ' . $this->t('restores') . ' r LEFT JOIN ' . $anchors . ' a ON r.anchor_id = a.id WHERE a.id IS NULL');
 
         return $deleted;
     }

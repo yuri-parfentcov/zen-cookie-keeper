@@ -4,7 +4,7 @@
  *
  * Centralises table names and the dbDelta CREATE statements so that the
  * activator, the store (repository) and uninstall.php all share one source of
- * truth. Five tables, all keyed by anchor_id, all carrying TTL columns that
+ * truth. Seven tables, all keyed by anchor_id, all carrying TTL columns that
  * drive the cron purge.
  *
  * @package Zen_Cookie_Keeper
@@ -19,7 +19,7 @@ class Zen_Cookie_Keeper_Schema {
     /**
      * Fully-qualified table name for a logical table key.
      *
-     * @param string $key One of: anchors, values, consent, audit, ops, clicks.
+     * @param string $key One of: anchors, values, consent, audit, ops, clicks, restores.
      * @return string
      */
     public static function table($key) {
@@ -33,7 +33,7 @@ class Zen_Cookie_Keeper_Schema {
      * @return string[]
      */
     public static function table_keys() {
-        return array('anchors', 'values', 'consent', 'audit', 'ops', 'clicks');
+        return array('anchors', 'values', 'consent', 'audit', 'ops', 'clicks', 'restores');
     }
 
     /**
@@ -51,6 +51,7 @@ class Zen_Cookie_Keeper_Schema {
         $audit    = self::table('audit');
         $ops      = self::table('ops');
         $clicks   = self::table('clicks');
+        $restores = self::table('restores');
 
         // 1. Anchors / identities. The browser holds only the raw token; we
         //    store its SHA-256. IP and UA are hashed — never stored raw.
@@ -159,11 +160,34 @@ class Zen_Cookie_Keeper_Schema {
             KEY expires_at (expires_at)
         ) $charset_collate;";
 
+        // 7. Restore history — one row per re-emitted cookie (the report that
+        //    proves ITP/ETP survival). Deliberately carries NO cookie value:
+        //    only the event dimensions (cookie, bucket, platform, reason) and
+        //    the recovered identity's age. TTL-driven like clicks.
+        $sql_restores = "CREATE TABLE $restores (
+            id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            anchor_id BIGINT UNSIGNED NOT NULL,
+            cookie_name VARCHAR(64) NOT NULL DEFAULT '',
+            bucket VARCHAR(16) NOT NULL DEFAULT '',
+            platform VARCHAR(32) NOT NULL DEFAULT '',
+            reason VARCHAR(16) NOT NULL DEFAULT '',
+            value_age INT UNSIGNED NOT NULL DEFAULT 0,
+            remaining_lifetime INT UNSIGNED NOT NULL DEFAULT 0,
+            created_at DATETIME NOT NULL DEFAULT '1970-01-01 00:00:00',
+            expires_at DATETIME NOT NULL DEFAULT '1970-01-01 00:00:00',
+            PRIMARY KEY  (id),
+            KEY cookie_created (cookie_name, created_at),
+            KEY anchor_id (anchor_id),
+            KEY created_at (created_at),
+            KEY expires_at (expires_at)
+        ) $charset_collate;";
+
         dbDelta($sql_anchors);
         dbDelta($sql_values);
         dbDelta($sql_consent);
         dbDelta($sql_audit);
         dbDelta($sql_ops);
         dbDelta($sql_clicks);
+        dbDelta($sql_restores);
     }
 }

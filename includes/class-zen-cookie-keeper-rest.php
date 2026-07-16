@@ -203,13 +203,10 @@ class Zen_Cookie_Keeper_Rest {
         }
 
         // --- Restore ----------------------------------------------------
-        // Skip anything just minted in this same request (it is already in $emit).
-        $minted_now    = array_flip($set);
-        $restore_specs = Zen_Cookie_Keeper_Restore::plan($anchor_id, $captured, $granted);
+        // Anything just minted in this same request is excluded inside plan()
+        // (it is already in $emit, and it must not be logged as a restore).
+        $restore_specs = Zen_Cookie_Keeper_Restore::plan($anchor_id, $captured, $granted, array_flip($set));
         foreach ($restore_specs as $spec) {
-            if (isset($minted_now[$spec['name']])) {
-                continue;
-            }
             $emit[] = $spec;
             $set[]  = $spec['name'];
         }

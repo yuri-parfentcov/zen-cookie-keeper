@@ -23,9 +23,12 @@ class Zen_Cookie_Keeper_Restore {
      * @param array $incoming  cookie_name => current value in the browser (from
      *                         the companion's read-only report). Missing key = absent.
      * @param array $granted   ['analytics'=>bool,'advertising'=>bool]
+     * @param array $exclude   cookie_name => anything. Names minted earlier in
+     *                         the SAME request: they are already being emitted
+     *                         and must not be logged/counted as restores.
      * @return array List of emit specs for the Emitter.
      */
-    public static function plan($anchor_id, $incoming, $granted) {
+    public static function plan($anchor_id, $incoming, $granted, $exclude = array()) {
         $store  = Zen_Cookie_Keeper_Store::instance();
         $stored = $store->get_values($anchor_id);
         $specs  = array();
@@ -38,6 +41,11 @@ class Zen_Cookie_Keeper_Restore {
 
         foreach ($stored as $row) {
             $name = $row['cookie_name'];
+
+            // Just stored by the mint step of this very request — not a restore.
+            if (isset($exclude[$name])) {
+                continue;
+            }
 
             // Bucket must currently be granted.
             $bucket = $row['bucket'];
@@ -74,8 +82,38 @@ class Zen_Cookie_Keeper_Restore {
 
             $store->mark_restored($row['id']);
             $store->insert_op('restore', $name, 'emitted', $anchor_id);
+
+            // Durable history event for the Restore History report. 'missing'
+            // = the browser had lost the cookie (ITP/expiry) and we brought it
+            // back; 'divergent' = it held a different value and we corrected
+            // it to the stored one. No cookie value is recorded here.
+            $store->record_restore(
+                $anchor_id,
+                array(
+                    'cookie_name'        => $name,
+                    'bucket'             => $bucket,
+                    'platform'           => isset($catalog[$name]['platform']) ? $catalog[$name]['platform'] : '',
+                    'reason'             => (null === $current) ? 'missing' : 'divergent',
+                    'value_age'          => $age,
+                    'remaining_lifetime' => $remaining,
+                ),
+                self::retention_seconds()
+            );
         }
 
         return $specs;
+    }
+
+    /**
+     * Retention window for restore-history rows, in seconds (default 365 days).
+     *
+     * @return int
+     */
+    public static function retention_seconds() {
+        $days = (int) get_option('zen_cookie_keeper_restore_retention_days', 365);
+        if ($days < 1) {
+            $days = 1;
+        }
+        return $days * DAY_IN_SECONDS;
     }
 }

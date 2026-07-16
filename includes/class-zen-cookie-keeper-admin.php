@@ -28,13 +28,15 @@ class Zen_Cookie_Keeper_Admin {
             'save_consent', 'save_botgate', 'save_formats', 'save_domain',
             'erasure', 'refresh_diagnostics', 'rotate_token',
             'refresh_adclicks', 'save_adclicks',
+            'refresh_restores', 'save_restores',
         );
         foreach ($ajax as $action) {
             add_action('wp_ajax_zen_cookie_keeper_' . $action, array($this, 'ajax_' . $action));
         }
 
-        // CSV export is a file download, so it goes through admin-post (not AJAX).
+        // CSV exports are file downloads, so they go through admin-post (not AJAX).
         add_action('admin_post_zen_cookie_keeper_export_clicks', array($this, 'export_clicks'));
+        add_action('admin_post_zen_cookie_keeper_export_restores', array($this, 'export_restores'));
     }
 
     /* ----------------------------------------------------------------- Menu */
@@ -54,6 +56,7 @@ class Zen_Cookie_Keeper_Admin {
             'zen-cookie-keeper-cookies'     => __('Cookies', 'zen-cookie-keeper'),
             'zen-cookie-keeper-consent'     => __('Consent', 'zen-cookie-keeper'),
             'zen-cookie-keeper-adclicks'    => __('Ad Clicks', 'zen-cookie-keeper'),
+            'zen-cookie-keeper-restores'    => __('Restore History', 'zen-cookie-keeper'),
             'zen-cookie-keeper-diagnostics' => __('Diagnostics', 'zen-cookie-keeper'),
             'zen-cookie-keeper-sites'       => __('Sites', 'zen-cookie-keeper'),
         );
@@ -62,6 +65,7 @@ class Zen_Cookie_Keeper_Admin {
             'zen-cookie-keeper-cookies'     => 'render_cookies',
             'zen-cookie-keeper-consent'     => 'render_consent',
             'zen-cookie-keeper-adclicks'    => 'render_adclicks',
+            'zen-cookie-keeper-restores'    => 'render_restores',
             'zen-cookie-keeper-diagnostics' => 'render_diagnostics',
             'zen-cookie-keeper-sites'       => 'render_sites',
         );
@@ -154,6 +158,24 @@ class Zen_Cookie_Keeper_Admin {
             'rows'      => $data['rows'],
             'count'     => $data['count'],
             'retention' => (int) get_option('zen_cookie_keeper_click_retention_days', 365),
+        ));
+    }
+
+    public function render_restores() {
+        $to   = gmdate('Y-m-d');
+        $from = gmdate('Y-m-d', time() - (29 * DAY_IN_SECONDS));
+        $data = $this->restores_data($from, $to, '');
+
+        $this->view('restores-page', array(
+            'from'      => $from,
+            'to'        => $to,
+            'cookie'    => '',
+            'cookies'   => array_keys(Zen_Cookie_Keeper_Registry::get_catalog()),
+            'totals'    => $data['totals'],
+            'series'    => $data['series'],
+            'rows'      => $data['rows'],
+            'count'     => $data['count'],
+            'retention' => (int) get_option('zen_cookie_keeper_restore_retention_days', 365),
         ));
     }
 
@@ -444,6 +466,131 @@ class Zen_Cookie_Keeper_Admin {
         $days = max(1, (int) $this->post('retention_days'));
         update_option('zen_cookie_keeper_click_retention_days', $days);
         wp_send_json_success(array('retention' => $days));
+    }
+
+    /* ------------------------------------------------------ Restore history */
+
+    /**
+     * Gather the restore-history bundle for a filter window. Dates are calendar
+     * days (Y-m-d) expanded to full GMT-day bounds against the GMT created_at
+     * column, matching the ad-clicks screen.
+     *
+     * @return array{totals:array, series:array, rows:array, count:int}
+     */
+    private function restores_data($from_date, $to_date, $cookie) {
+        $store = Zen_Cookie_Keeper_Store::instance();
+        $from  = $from_date . ' 00:00:00';
+        $to    = $to_date . ' 23:59:59';
+        return array(
+            'totals' => $store->restore_totals($from, $to, $cookie),
+            'series' => $store->restore_timeseries($from, $to, $cookie),
+            'rows'   => $store->restore_list($from, $to, $cookie, 200, 0),
+            'count'  => $store->restore_list_count($from, $to, $cookie),
+        );
+    }
+
+    /**
+     * Allowlist a cookie-name filter against the live catalog ('' = all).
+     */
+    private function sanitize_cookie_filter($val) {
+        $val = sanitize_text_field((string) $val);
+        if ($val === '') {
+            return '';
+        }
+        $catalog = Zen_Cookie_Keeper_Registry::get_catalog();
+        return isset($catalog[$val]) ? $val : '';
+    }
+
+    /**
+     * Shape a stored restore row into the display fields the table/JS use.
+     * Ages/lifetimes are surfaced in whole days (the report granularity).
+     *
+     * @return array
+     */
+    private function format_restore_row($row) {
+        return array(
+            'created_at'     => (string) $row['created_at'],
+            'cookie'         => (string) $row['cookie_name'],
+            'platform'       => (string) $row['platform'],
+            'bucket'         => (string) $row['bucket'],
+            'reason'         => (string) $row['reason'],
+            'age_days'       => (int) round(((int) $row['value_age']) / DAY_IN_SECONDS),
+            'remaining_days' => (int) round(((int) $row['remaining_lifetime']) / DAY_IN_SECONDS),
+        );
+    }
+
+    public function ajax_refresh_restores() {
+        $this->guard();
+        $to     = $this->sanitize_date($this->post('to'), gmdate('Y-m-d'));
+        $from   = $this->sanitize_date($this->post('from'), gmdate('Y-m-d', time() - (29 * DAY_IN_SECONDS)));
+        $cookie = $this->sanitize_cookie_filter($this->post('cookie'));
+
+        $data = $this->restores_data($from, $to, $cookie);
+        wp_send_json_success(array(
+            'from'   => $from,
+            'to'     => $to,
+            'cookie' => $cookie,
+            'totals' => $data['totals'],
+            'series' => $data['series'],
+            'rows'   => array_map(array($this, 'format_restore_row'), $data['rows']),
+            'count'  => (int) $data['count'],
+        ));
+    }
+
+    public function ajax_save_restores() {
+        $this->guard();
+        $days = max(1, (int) $this->post('retention_days'));
+        update_option('zen_cookie_keeper_restore_retention_days', $days);
+        wp_send_json_success(array('retention' => $days));
+    }
+
+    /**
+     * Stream the filtered restore-history list as a CSV download (admin-post,
+     * same pattern and nonce as the ad-clicks export).
+     */
+    public function export_restores() {
+        if (!current_user_can(self::CAP)) {
+            wp_die(esc_html__('Unauthorized', 'zen-cookie-keeper'), '', array('response' => 403));
+        }
+        check_admin_referer('zen_cookie_keeper_export');
+
+        // Filters arrive on the query string; the nonce above (check_admin_referer)
+        // authenticates the request and each value is strictly sanitised here.
+        $to     = $this->sanitize_date(isset($_GET['to']) ? sanitize_text_field(wp_unslash($_GET['to'])) : '', gmdate('Y-m-d'));
+        $from   = $this->sanitize_date(isset($_GET['from']) ? sanitize_text_field(wp_unslash($_GET['from'])) : '', gmdate('Y-m-d', time() - (29 * DAY_IN_SECONDS)));
+        $cookie = $this->sanitize_cookie_filter(isset($_GET['cookie']) ? sanitize_text_field(wp_unslash($_GET['cookie'])) : '');
+
+        $store   = Zen_Cookie_Keeper_Store::instance();
+        $from_dt = $from . ' 00:00:00';
+        $to_dt   = $to . ' 23:59:59';
+
+        nocache_headers();
+        header('Content-Type: text/csv; charset=utf-8');
+        header('Content-Disposition: attachment; filename=zenck-restores-' . gmdate('Ymd-His') . '.csv');
+
+        // php://output is the correct sink for a streamed download; WP_Filesystem
+        // does not apply to a live HTTP response body.
+        $handle = fopen('php://output', 'w'); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fopen
+        fputcsv($handle, array(
+            'restored_at_utc', 'cookie', 'platform', 'bucket', 'reason',
+            'value_age_seconds', 'remaining_lifetime_seconds',
+        ));
+
+        $limit  = 1000;
+        $offset = 0;
+        do {
+            $rows = $store->restore_list($from_dt, $to_dt, $cookie, $limit, $offset);
+            foreach ($rows as $r) {
+                fputcsv($handle, array(
+                    $r['created_at'], $r['cookie_name'], $r['platform'], $r['bucket'],
+                    $r['reason'], $r['value_age'], $r['remaining_lifetime'],
+                ));
+            }
+            $offset += $limit;
+        } while (count($rows) === $limit);
+
+        fclose($handle); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose
+        exit;
     }
 
     /**

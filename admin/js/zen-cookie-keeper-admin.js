@@ -393,6 +393,248 @@
 		});
 	})();
 
+	/* ----- Restore History: filter, chart, export, retention ----- */
+	(function () {
+		var $filter = $('#zenck-restores-filter');
+		if (!$filter.length) {
+			return; // Not on the Restore History screen.
+		}
+
+		var COLORS = ['#2271B1', '#34A853', '#D63638', '#DBA617', '#8E44AD', '#16A085', '#D35400', '#2C3E50', '#7F8C8D', '#C0392B'];
+
+		function colorFor(idx) {
+			return COLORS[idx % COLORS.length];
+		}
+
+		function esc(v) {
+			return v === null || v === undefined ? '' : String(v);
+		}
+
+		function currentFilters() {
+			return {
+				from: $filter.find('[name="from"]').val() || '',
+				to: $filter.find('[name="to"]').val() || '',
+				cookie: $filter.find('[name="cookie"]').val() || ''
+			};
+		}
+
+		function updateExportLink(f) {
+			var base = cfg.exportBase || '';
+			var q = [
+				'action=zen_cookie_keeper_export_restores',
+				'_wpnonce=' + encodeURIComponent(cfg.exportNonce || ''),
+				'from=' + encodeURIComponent(f.from),
+				'to=' + encodeURIComponent(f.to),
+				'cookie=' + encodeURIComponent(f.cookie)
+			].join('&');
+			$('#zenck-restores-export').attr('href', base + (base.indexOf('?') === -1 ? '?' : '&') + q);
+		}
+
+		/* --- Cards --- */
+		function renderCards(totals, from, to) {
+			totals = totals || {};
+			var by = totals.by_reason || {};
+			$('[data-zenck-r-total]').text(totals.total || 0);
+			$('[data-zenck-r-range]').text(from + ' → ' + to);
+			$('[data-zenck-r-missing]').text(by.missing || 0);
+			$('[data-zenck-r-divergent]').text(by.divergent || 0);
+			$('[data-zenck-r-avgage]').text(Math.round((totals.avg_age || 0) / 86400));
+		}
+
+		/* --- Table --- */
+		function renderTable(rows, count) {
+			var $tbody = $('#zenck-restores-table tbody').empty();
+			if (!rows || !rows.length) {
+				$('<tr class="zenck-empty-row"><td colspan="7"></td></tr>')
+					.find('td').text('No restores recorded in this window yet.').end()
+					.appendTo($tbody);
+			} else {
+				for (var i = 0; i < rows.length; i++) {
+					var r = rows[i];
+					var $tr = $('<tr>');
+					[
+						esc(r.created_at), esc(r.cookie), esc(r.platform), esc(r.bucket),
+						esc(r.reason), esc(r.age_days), esc(r.remaining_days)
+					].forEach(function (val) {
+						$tr.append($('<td>').text(val));
+					});
+					$tbody.append($tr);
+				}
+			}
+			$('#zenck-restores-count').text('Showing ' + (rows ? rows.length : 0) + ' of ' + (count || 0));
+		}
+
+		/* --- Chart: stacked daily bars per cookie --- */
+		function drawChart(series) {
+			var canvas = document.getElementById('zenck-restores-chart');
+			if (!canvas || !canvas.getContext) {
+				return;
+			}
+			var wrap = canvas.parentNode;
+			var cssW = Math.max(320, wrap.clientWidth || 640);
+			var cssH = 260;
+			var ratio = window.devicePixelRatio || 1;
+			canvas.width = cssW * ratio;
+			canvas.height = cssH * ratio;
+			canvas.style.width = cssW + 'px';
+			canvas.style.height = cssH + 'px';
+			var ctx = canvas.getContext('2d');
+			ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+			ctx.clearRect(0, 0, cssW, cssH);
+
+			series = series || [];
+			// Pivot into days[] and cookies[] with a counts map.
+			var dayOrder = [];
+			var daySeen = {};
+			var ckSeen = {};
+			var counts = {}; // day -> cookie -> n
+			for (var i = 0; i < series.length; i++) {
+				var d = String(series[i].day);
+				var c = String(series[i].cookie_name);
+				var n = parseInt(series[i].n, 10) || 0;
+				if (!daySeen[d]) { daySeen[d] = true; dayOrder.push(d); }
+				ckSeen[c] = true;
+				if (!counts[d]) { counts[d] = {}; }
+				counts[d][c] = (counts[d][c] || 0) + n;
+			}
+			dayOrder.sort();
+			var cookies = Object.keys(ckSeen).sort();
+
+			var padL = 34, padR = 10, padT = 12, padB = 28;
+			var plotW = cssW - padL - padR;
+			var plotH = cssH - padT - padB;
+
+			// Max stacked total per day.
+			var maxV = 0;
+			for (var di = 0; di < dayOrder.length; di++) {
+				var tot = 0;
+				var cd = counts[dayOrder[di]] || {};
+				for (var ck in cd) { if (cd.hasOwnProperty(ck)) { tot += cd[ck]; } }
+				if (tot > maxV) { maxV = tot; }
+			}
+			if (maxV <= 0) { maxV = 1; }
+
+			var textColor = '#50575e';
+			var gridColor = '#dcdcde';
+
+			// Axes / gridlines (4 steps).
+			ctx.strokeStyle = gridColor;
+			ctx.fillStyle = textColor;
+			ctx.font = '11px sans-serif';
+			ctx.textAlign = 'right';
+			ctx.textBaseline = 'middle';
+			var steps = 4;
+			for (var s = 0; s <= steps; s++) {
+				var val = Math.round(maxV * s / steps);
+				var y = padT + plotH - (plotH * s / steps);
+				ctx.beginPath();
+				ctx.moveTo(padL, y);
+				ctx.lineTo(cssW - padR, y);
+				ctx.stroke();
+				ctx.fillText(String(val), padL - 6, y);
+			}
+
+			if (!dayOrder.length) {
+				ctx.textAlign = 'center';
+				ctx.fillText('No data in range', padL + plotW / 2, padT + plotH / 2);
+				renderLegend(cookies);
+				return;
+			}
+
+			var slot = plotW / dayOrder.length;
+			var barW = Math.max(2, Math.min(28, slot * 0.7));
+			ctx.textAlign = 'center';
+			ctx.textBaseline = 'top';
+
+			for (var d2 = 0; d2 < dayOrder.length; d2++) {
+				var day = dayOrder[d2];
+				var cx = padL + slot * d2 + slot / 2;
+				var yBase = padT + plotH;
+				var stack = counts[day] || {};
+				for (var ci = 0; ci < cookies.length; ci++) {
+					var cname = cookies[ci];
+					var v = stack[cname] || 0;
+					if (v <= 0) { continue; }
+					var h = (v / maxV) * plotH;
+					ctx.fillStyle = colorFor(ci);
+					ctx.fillRect(cx - barW / 2, yBase - h, barW, h);
+					yBase -= h;
+				}
+				// Sparse x labels (~ up to 8).
+				var every = Math.ceil(dayOrder.length / 8);
+				if (d2 % every === 0) {
+					ctx.fillStyle = textColor;
+					ctx.fillText(day.slice(5), cx, padT + plotH + 6);
+				}
+			}
+			renderLegend(cookies);
+		}
+
+		function renderLegend(cookies) {
+			var $legend = $('#zenck-restores-legend').empty();
+			for (var i = 0; i < cookies.length; i++) {
+				var $item = $('<span class="zenck-legend-item">');
+				$('<span class="zenck-legend-swatch">').css('background', colorFor(i)).appendTo($item);
+				$('<span>').text(cookies[i]).appendTo($item);
+				$legend.append($item);
+			}
+		}
+
+		var lastSeries = [];
+
+		function refresh() {
+			var f = currentFilters();
+			var $status = $('#zenck-restores-status');
+			$status.text('…').removeClass('zenck-ok zenck-warn');
+			updateExportLink(f);
+			post('refresh_restores', f, function (res) {
+				if (!res || !res.success) {
+					flash($status, false, res && res.data && res.data.message);
+					return;
+				}
+				var d = res.data;
+				renderCards(d.totals, d.from, d.to);
+				renderTable(d.rows, d.count);
+				lastSeries = d.series || [];
+				drawChart(lastSeries);
+				$status.text('');
+			});
+		}
+
+		$filter.on('submit', function (e) {
+			e.preventDefault();
+			refresh();
+		});
+
+		$(document).on('submit', '#zenck-restores-retention', function (e) {
+			e.preventDefault();
+			post('save_restores', {
+				retention_days: parseInt($(this).find('[name="retention_days"]').val(), 10) || 1
+			}, function (res) {
+				flash($('#zenck-restores-retention-result'), !!res.success);
+			});
+		});
+
+		var resizeTimer;
+		$(window).on('resize', function () {
+			clearTimeout(resizeTimer);
+			resizeTimer = setTimeout(function () { drawChart(lastSeries); }, 150);
+		});
+
+		// Initial paint from the server-embedded bootstrap data.
+		$(function () {
+			var raw = document.getElementById('zenck-restores-data');
+			if (raw) {
+				try {
+					var boot = JSON.parse(raw.textContent || '{}');
+					lastSeries = boot.series || [];
+					updateExportLink(currentFilters());
+					drawChart(lastSeries);
+				} catch (e) {}
+			}
+		});
+	})();
+
 	/* ----- Self-test (runs against the public REST endpoint) ----- */
 	$(document).on('click', '#zenck-selftest', function () {
 		var $r = $('#zenck-selftest-result');

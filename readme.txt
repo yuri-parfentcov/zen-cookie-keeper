@@ -4,7 +4,7 @@ Tags: cookies, consent, first-party, analytics, attribution
 Requires at least: 6.2
 Tested up to: 7.0
 Requires PHP: 7.4
-Stable tag: 1.1.0
+Stable tag: 1.2.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -68,6 +68,11 @@ It can optionally consume an inbound `X-JA4` TLS-fingerprint request header for 
 
 == Changelog ==
 
+= 1.2.0 =
+* New: Restore History screen. Every server re-emission of a stored cookie is recorded as a dated event with the cookie, platform, consent bucket, reason ("missing" — the browser had lost the cookie and it was brought back, or "divergent" — the browser held a different value and it was corrected) and the age of the recovered identity.
+* New: filter the history by date range and cookie, a daily per-cookie chart, totals with the missing/divergent split and average recovered-identity age, and a CSV export.
+* No cookie values are stored in the history — only event dimensions. Rows honour a configurable retention window (default 365 days) and are removed by the daily cleanup. Erasure and uninstall remove them too.
+
 = 1.1.0 =
 * New: Ad Clicks screen. Every visit that lands with an ad platform click id (Google Ads gclid/wbraid/gbraid/dclid, Microsoft Ads msclkid, Meta fbclid, TikTok ttclid, LinkedIn) is recorded once per session, with landing path, referrer and UTM attribution.
 * New: filter the recorded clicks by date range and platform, a daily per-platform chart, totals, and a CSV export of the list.
@@ -85,6 +90,9 @@ It can optionally consume an inbound `X-JA4` TLS-fingerprint request header for 
 * Initial release: server-side mint / capture / restore of first-party marketing and analytics cookies; HttpOnly anchor with computed lifecycle; per-bucket Consent Mode v2 gating with consent record, withdrawal and erasure; cache-aware uncached write path with exclusions for the major page-cache plugins; cookie registry with custom cookies; diagnostics and self-test; optional JA4/heuristic bot-gating; multisite/multi-domain cookie scoping; daily storage-limitation cleanup.
 
 == Upgrade Notice ==
+
+= 1.2.0 =
+Adds the Restore History report screen (missing/divergent split, per-cookie chart, filters and CSV export). Adds one database table on upgrade.
 
 = 1.1.0 =
 Adds the Ad Clicks stats screen (per-platform totals, chart, filters and CSV export). Consent-gated; adds one database table on upgrade.
